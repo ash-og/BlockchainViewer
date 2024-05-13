@@ -20,6 +20,7 @@ def create_message(magic, command, payload):
     checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[0:4]
     return(struct.pack('L12sL4s', magic, command.encode(), len(payload), checksum) + payload)
 
+
 # Create the "version" request payload
 def create_payload_version():
     version = struct.pack('i', 70015)  # Protocol version 70015
@@ -31,14 +32,15 @@ def create_payload_version():
     addr_from = struct.pack('>Q16s', 0, b'\x00'*16) # This is ignored in version messages so it's filled with dummy values
     
     nonce = struct.pack('Q',random.getrandbits(64))
-    user_agent = create_sub_version()
+    user_agent_bytes = b'/Satoshi:0.7.2/'  # User agent
+    user_agent = struct.pack('B', len(user_agent_bytes)) + user_agent_bytes
     start_height = struct.pack('i', -1)
-    struct.pack('?', False)
+    relay = struct.pack('?', False)
     payload = version + services + timestamp + addr_recv + addr_from + nonce + user_agent + start_height + relay
 
     return(payload)
 
-
+print(create_payload_version())
 
 
 def connect_to_node(host, port=8333):
