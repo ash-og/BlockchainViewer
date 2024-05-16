@@ -19,22 +19,18 @@ def create_message(command, payload):
 
 # Create the "version" request payload
 def create_payload_version():
-    version = struct.pack('i', 70015)  # Protocol version 70015
-    services = struct.pack('Q', 0)  # Node services (0 for none)
-    timestamp = struct.pack('q', int(time.time()))
-
-    # Network address 
-    addr_recv = struct.pack('>Q16s', 0, b'\x00'*16)
-    addr_from = struct.pack('>Q16s', 0, b'\x00'*16) # This is ignored in version messages so it's filled with dummy values
-    
-    nonce = struct.pack('Q',random.getrandbits(64))
+    version = struct.pack('<i', 70015)  # Protocol version 70015
+    services = struct.pack('<Q', 0)    # Node services (0 for none)
+    timestamp = struct.pack('<q', int(time.time()))
+    addr_recv = b"\x00" * 26  # Dummy addresses and ports
+    addr_from = b"\x00" * 26
+    nonce = struct.pack('<Q',random.getrandbits(64))
     user_agent_bytes = b'/Satoshi:0.7.2/'  # User agent
-    user_agent = struct.pack('B', len(user_agent_bytes)) + user_agent_bytes
-    start_height = struct.pack('i', -1)
-    relay = struct.pack('?', False)
-    payload = version + services + timestamp + addr_recv + addr_from + nonce + user_agent + start_height + relay
+    user_agent = struct.pack('<B', len(user_agent_bytes)) + user_agent_bytes
+    start_height = struct.pack('<i', -1) # start height unknown (-1)
+    relay = struct.pack('<?', False)
+    return version + services + timestamp + addr_recv + addr_from + nonce + user_agent + start_height + relay
 
-    return(payload)
 
 #print(create_payload_version())
 
@@ -46,66 +42,54 @@ def create_message_verack():
 
 #Get Data Request
 
-# Print response
-def print_response(command, request_data, response_data):
-    print("")
-    print("Command: " + command)
-    print("Request:")
-    print(binascii.hexlify(request_data))
-    print("Response:")
-    print(binascii.hexlify(response_data))
 
 #Parsers
 
-
-# get Data Request
 
 
 if __name__ == '__main__':
     # Set constants
     peer_ip_address = '188.165.244.143'
     peer_tcp_port = 8333
-    buffer_size = 1024
-
-    # Create Request Objects
-    version_payload = create_payload_version()
-    print("Version Payload: ", version_payload)
-    version_message = create_message('version', version_payload)
-    verack_message = create_message_verack()
-    # getdata_payload = create_payload_getdata(tx_id)
-    # getdata_message = create_message(magic_value, 'getdata', getdata_payload)
 
     # Establish TCP Connection
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((peer_ip_address, peer_tcp_port))
+    s.connect((peer_ip_address, 8333))
+
+    # Create Request Objects
+    version_payload = create_payload_version()
+    version_message = create_message('version', version_payload)
+    verack_message = create_message_verack()
 
     # Send message "version"
     s.send(version_message)
-    response_data = s.recv(buffer_size)
-    print_response("version", version_message, response_data)
+    response_data = s.recv(1024)
+    print("Received response:", response_data)
+    if response_data:
+        # Getting command type to check if it's 'version'
+        command = response_data[4:16].strip(b'\x00').decode('utf-8')
+        if command == 'version':
+            print("Received 'version' message")
+            # Send 'verack' after receiving 'version'
+            verack_msg = create_message('verack', b'')
+            s.send(verack_msg)
+            print("Sent 'verack' message")
+            # Expect to receive 'verack' as well
+            s.recv(1024)
 
-    # Send message "verack"
-    s.send(verack_message)
-    response_data = s.recv(buffer_size)
-    print_response("verack", verack_message, response_data)
-
-    # try:
-    #     # Continuously listen for messages
-    #     while True:
-    #         msg = s.recv(1024)  # Adjust size as needed
-    #         if not msg:
-    #             break
-    #         # Process each message type accordingly (e.g., handle 'inv' messages)
-    #         print("Received message:", msg)
-    # except Exception as e:
-    #     print("Error:", e)
-    # finally:
-    #     s.close()
-
-    # Send message "getdata"
-    # s.send(getdata_message)
-    # response_data = s.recv(buffer_size)
-    # print_response("getdata", getdata_message, response_data)
-
-    # Close the TCP connection
-    s.close()
+    # # Send message "verack"
+    # s.send(verack_message)
+    # response_data = s.recv(1024)
+    print("Here")
+    try:
+        # Continuously listen for messages
+        while True:
+            msg = s.recv(2048)  # Adjust size as needed
+            if not msg:
+                break
+            # Process each message type accordingly (e.g., handle 'inv' messages)
+            print("Received message:", msg)
+    except Exception as e:
+        print("Error:", e)
+    finally:
+        s.close()
