@@ -6,13 +6,6 @@ import hashlib
 import binascii
 
 
-# Binary encode the sub-version
-# Source: https://dev.to/alecbuda/introduction-to-the-bitcoin-network-protocol-using-python-and-tcp-sockets-1le6    
-def create_sub_version():
-    sub_version = "/Satoshi:0.7.2/"
-    return b'\x0F' + sub_version.encode()
-
-
 # Create the TCP request object
 # Source: https://dev.to/alecbuda/introduction-to-the-bitcoin-network-protocol-using-python-and-tcp-sockets-1le6    
 def create_message(magic, command, payload):
@@ -42,6 +35,16 @@ def create_payload_version():
 
 print(create_payload_version())
 
+# Create the "verack" request message
+# Source: https://dev.to/alecbuda/introduction-to-the-bitcoin-network-protocol-using-python-and-tcp-sockets-1le6    
+def create_message_verack():
+    return bytearray.fromhex("f9beb4d976657261636b000000000000000000005df6e0e2")
+
+
+#Get Data Request
+
+
+#Parsers
 
 def connect_to_node(host, port=8333):
     """Creates a TCP socket connecting to the host specified and the Bitcoin port."""
