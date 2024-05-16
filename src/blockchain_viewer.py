@@ -8,8 +8,9 @@ import binascii
 
 # Create the TCP request object
 # Source: https://dev.to/alecbuda/introduction-to-the-bitcoin-network-protocol-using-python-and-tcp-sockets-1le6    
-def create_message(magic, command, payload):
-    """Creates a TCP request object with the specified magic number, command, and payload."""
+def create_message(command, payload):
+    """Creates a TCP request object with the magic number, command, and payload."""
+    magic = 0xd9b4bef9  # Magic number for the main network
     checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[0:4]
     return(struct.pack('L12sL4s', magic, command.encode(), len(payload), checksum) + payload)
 
@@ -33,7 +34,7 @@ def create_payload_version():
 
     return(payload)
 
-print(create_payload_version())
+#print(create_payload_version())
 
 # Create the "verack" request message
 # Source: https://dev.to/alecbuda/introduction-to-the-bitcoin-network-protocol-using-python-and-tcp-sockets-1le6    
@@ -43,12 +44,53 @@ def create_message_verack():
 
 #Get Data Request
 
+# Print response
+def print_response(command, request_data, response_data):
+    print("")
+    print("Command: " + command)
+    print("Request:")
+    print(binascii.hexlify(request_data))
+    print("Response:")
+    print(binascii.hexlify(response_data))
 
 #Parsers
 
-def connect_to_node(host, port=8333):
-    """Creates a TCP socket connecting to the host specified and the Bitcoin port."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((host, port))
-    return sock
 
+# get Data Request
+
+
+if __name__ == '__main__':
+    # Set constants
+    peer_ip_address = '188.165.244.143'
+    peer_tcp_port = 8333
+    buffer_size = 1024
+
+    # Create Request Objects
+    version_payload = create_payload_version()
+    print("Version Payload: ", version_payload)
+    version_message = create_message('version', version_payload)
+    verack_message = create_message_verack()
+    # getdata_payload = create_payload_getdata(tx_id)
+    # getdata_message = create_message(magic_value, 'getdata', getdata_payload)
+
+    # Establish TCP Connection
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((peer_ip_address, peer_tcp_port))
+
+    # Send message "version"
+    s.send(version_message)
+    response_data = s.recv(buffer_size)
+    print_response("version", version_message, response_data)
+
+    # Send message "verack"
+    s.send(verack_message)
+    response_data = s.recv(buffer_size)
+    print_response("verack", verack_message, response_data)
+
+    # Send message "getdata"
+    # s.send(getdata_message)
+    # response_data = s.recv(buffer_size)
+    # print_response("getdata", getdata_message, response_data)
+
+    # Close the TCP connection
+    s.close()
