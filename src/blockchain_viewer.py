@@ -34,12 +34,6 @@ def create_payload_version():
 
 #print(create_payload_version())
 
-# Create the "verack" request message
-# Source: https://dev.to/alecbuda/introduction-to-the-bitcoin-network-protocol-using-python-and-tcp-sockets-1le6    
-def create_message_verack():
-    return bytearray.fromhex("f9beb4d976657261636b000000000000000000005df6e0e2")
-
-
 #Get Data Request
 
 
@@ -49,7 +43,7 @@ def create_message_verack():
 
 if __name__ == '__main__':
     # Set constants
-    peer_ip_address = '188.165.244.143'
+    peer_ip_address = '167.172.139.248'
     peer_tcp_port = 8333
 
     # Establish TCP Connection
@@ -59,9 +53,8 @@ if __name__ == '__main__':
     # Create Request Objects
     version_payload = create_payload_version()
     version_message = create_message('version', version_payload)
-    verack_message = create_message_verack()
 
-    # Send message "version"
+    # Send message 'version'
     s.send(version_message)
     response_data = s.recv(1024)
     print("Received response:", response_data)
@@ -74,20 +67,17 @@ if __name__ == '__main__':
             verack_msg = create_message('verack', b'')
             s.send(verack_msg)
             print("Sent 'verack' message")
-            # Expect to receive 'verack' as well
+            # Receive 'verack' message
             s.recv(1024)
+            print("Received 'verack' message")
 
-    # # Send message "verack"
-    # s.send(verack_message)
-    # response_data = s.recv(1024)
     print("Here")
     try:
         # Continuously listen for messages
         while True:
-            msg = s.recv(2048)  # Adjust size as needed
+            msg = s.recv(2048) 
             if not msg:
                 break
-            # Process each message type accordingly (e.g., handle 'inv' messages)
             print("Received message:", msg)
     except Exception as e:
         print("Error:", e)
