@@ -7,12 +7,14 @@ import binascii
 
 
 # Create the TCP request object
-# Source: https://dev.to/alecbuda/introduction-to-the-bitcoin-network-protocol-using-python-and-tcp-sockets-1le6    
 def create_message(command, payload):
     """Creates a TCP request object with the magic number, command, and payload."""
     magic = 0xd9b4bef9  # Magic number for the main network
-    checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[0:4]
-    return(struct.pack('L12sL4s', magic, command.encode(), len(payload), checksum) + payload)
+    command = command.encode() + b'\x00' * (12 - len(command))  # pad command to 12 bytes
+    payload_size = len(payload)
+    checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+    header = struct.pack('<L12sL4s', magic, command, payload_size, checksum)
+    return header + payload
 
 
 # Create the "version" request payload
@@ -86,6 +88,19 @@ if __name__ == '__main__':
     s.send(verack_message)
     response_data = s.recv(buffer_size)
     print_response("verack", verack_message, response_data)
+
+    # try:
+    #     # Continuously listen for messages
+    #     while True:
+    #         msg = s.recv(1024)  # Adjust size as needed
+    #         if not msg:
+    #             break
+    #         # Process each message type accordingly (e.g., handle 'inv' messages)
+    #         print("Received message:", msg)
+    # except Exception as e:
+    #     print("Error:", e)
+    # finally:
+    #     s.close()
 
     # Send message "getdata"
     # s.send(getdata_message)
