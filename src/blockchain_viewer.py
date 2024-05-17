@@ -57,9 +57,7 @@ if __name__ == '__main__':
     # Send message 'version'
     s.send(version_message)
     response_data = s.recv(1024)
-    print("Received response:", response_data)
     if response_data:
-        # NOTE: check for magic number?
         # Getting command type to check if it's 'version'
         command = response_data[4:16].strip(b'\x00').decode('utf-8')
         if command == 'version':
@@ -69,8 +67,10 @@ if __name__ == '__main__':
             s.send(verack_msg)
             print("Sent 'verack' message")
             # Receive 'verack' message
-            s.recv(1024)
-            print("Received 'verack' message")
+            verack_response = s.recv(1024)
+            command = verack_response[4:16].strip(b'\x00').decode('utf-8')
+            if command == 'verack':
+                print("Received 'verack' message")
 
     print("Here")
     try:
