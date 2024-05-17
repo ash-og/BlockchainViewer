@@ -38,7 +38,13 @@ def create_payload_version():
 
 
 #Parsers
-
+def handle_message(message):
+    magic = struct.unpack('<I', message[:4])[0]
+    command = message[4:16].strip(b'\x00').decode('utf-8')
+    length = struct.unpack('<I', message[16:20])[0]
+    checksum = struct.unpack('<I', message[20:24])[0]
+    payload = message[24:24+length]
+    return magic, command, length, checksum, payload
 
 
 if __name__ == '__main__':
@@ -78,8 +84,30 @@ if __name__ == '__main__':
         while True:
             msg = s.recv(2048) 
             if not msg:
+                print("Connection lost. Closing...")
                 break
-            print("Received message:", msg)
+            # magic = struct.unpack('<I', msg[:4])[0]
+            # print("Magic number:", magic)
+
+            # command = msg[4:16].strip(b'\x00').decode('utf-8')
+            # print("Command:", command)
+
+            # length = struct.unpack('<I', msg[16:20])[0]
+            # print("Payload length:", length)
+
+            # checksum = struct.unpack('<I', msg[20:24])[0]
+            # print("Checksum:", checksum)
+
+            # payload = msg[24:24+length]
+            # print("Payload:", payload)
+
+            magic, command, length, checksum, payload = handle_message(msg)
+            print("Magic number:", magic)
+            print("Command:", command)
+            print("Payload length:", length)
+            print("Checksum:", checksum)
+            print("Payload:", payload)
+
     except Exception as e:
         print("Error:", e)
     finally:
