@@ -115,6 +115,14 @@ if __name__ == '__main__':
                     print("Received 'inv' message with", len(inv_list), "inventory items")
                     get_data_msg = get_data_request(inv_list)
                     s.send(get_data_msg)
+                elif command == 'block':
+                    print("Received 'block' message")
+                elif command == 'tx': 
+                    print("Received 'tx' message")
+                elif command == 'ping':
+                    print("Received 'ping' message")
+                    pong_msg = create_message('pong', payload)
+                    s.send(pong_msg)
                 else:
                     print("Received", command, "message")
 
