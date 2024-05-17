@@ -37,7 +37,7 @@ def create_payload_version():
 #Get Data Request
 def get_data_request(inv_list):
     count = len(inv_list)
-    inv_payload = struct.pack('<B', count)
+    inv_payload = encode_varint(count)  # Encode count as varint
     for inv_item in inv_list:
         inv_type, inv_hash = inv_item
         inv_payload += struct.pack('<I', inv_type) + inv_hash
@@ -45,6 +45,27 @@ def get_data_request(inv_list):
 
 
 #Parsers
+def read_varint(payload):
+    value = payload[0]
+    if value < 253:
+        return value, 1
+    elif value == 253:
+        return struct.unpack('<H', payload[1:3])[0], 3
+    elif value == 254:
+        return struct.unpack('<I', payload[1:5])[0], 5
+    else:
+        return struct.unpack('<Q', payload[1:9])[0], 9
+    
+def encode_varint(value):
+    if value < 0xfd:
+        return struct.pack('<B', value)
+    elif value <= 0xffff:
+        return struct.pack('<B', 0xfd) + struct.pack('<H', value)
+    elif value <= 0xffffffff:
+        return struct.pack('<B', 0xfe) + struct.pack('<I', value)
+    else:
+        return struct.pack('<B', 0xff) + struct.pack('<Q', value)
+
 def parse_magic(message):
     return binascii.hexlify(message[:4]).decode('utf-8')
                                         
@@ -56,8 +77,7 @@ def handle_message(message):
     return command, length, checksum, payload
 
 def parse_inv_payload(payload):
-    count = payload[0]
-    offset = 1
+    count, offset = read_varint(payload)
     inv_list = []
     for _ in range(count):
         inv_type = struct.unpack('<I', payload[offset:offset+4])[0]
@@ -65,6 +85,17 @@ def parse_inv_payload(payload):
         inv_list.append((inv_type, inv_hash))
         offset += 36
     return inv_list
+
+
+
+def parse_block(payload):
+    version = payload[:4]
+    prev_block = payload[4:36]
+    merkle_root = payload[36:68]
+    timestamp = payload[68:72]
+    bits = payload[72:76]
+    nonce = payload[76:80]
+    return version, prev_block, merkle_root, timestamp, bits, nonce
 
 
 if __name__ == '__main__':
@@ -101,28 +132,50 @@ if __name__ == '__main__':
     print("Connected to bitcoin network!")
     try:
         # Continuously listen for messages
+        buffer = b""
         while True:
-            msg = s.recv(2048) 
-            if not msg:
-                raise Exception("No Message Received from Peer")
-            magic = parse_magic(msg)
-            if magic != 'f9beb4d9':
-                continue
-            else:
-                command, length, checksum, payload = handle_message(msg)
+            buffer += s.recv(2048)
+            while len(buffer) >= 24:  # Waiting for the buffer to reach minimum length of a Bitcoin message header
+                # Extract magic number and check if it's correct
+                magic = parse_magic(buffer)
+                if magic != 'f9beb4d9':
+                    print("Magic:", magic)
+                    # Skip the first byte and reattempt parsing
+                    buffer = buffer[1:]
+                    continue
+
+                command, length, checksum, payload = handle_message(buffer)
+                total_length = 24 + length
+                if len(buffer) < total_length:
+                    break  # Wait for the complete message
+
+                message = buffer[:total_length]
+                buffer = buffer[total_length:]
+
                 if command == 'inv':
                     inv_list = parse_inv_payload(payload)
                     print("Received 'inv' message with", len(inv_list), "inventory items")
                     get_data_msg = get_data_request(inv_list)
                     s.send(get_data_msg)
+
                 elif command == 'block':
                     print("Received 'block' message")
-                elif command == 'tx': 
+                    version, prev_block, merkle_root, timestamp, bits, nonce = parse_block(payload)
+                    print("Block Version:", version)
+                    print("Previous Block Hash:", binascii.hexlify(prev_block).decode('utf-8'))
+                    print("Merkle Root:", binascii.hexlify(merkle_root).decode('utf-8'))
+                    print("Timestamp:", struct.unpack('<I', timestamp)[0])
+                    print("Bits:", struct.unpack('<I', bits)[0])
+                    print("Nonce:", struct.unpack('<I', nonce)[0])
+
+                elif command == 'tx':
                     print("Received 'tx' message")
+
                 elif command == 'ping':
                     print("Received 'ping' message")
                     pong_msg = create_message('pong', payload)
                     s.send(pong_msg)
+
                 else:
                     print("Received", command, "message")
 
