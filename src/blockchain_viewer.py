@@ -35,16 +35,25 @@ def create_payload_version():
 #print(create_payload_version())
 
 #Get Data Request
+def get_data_request(inv_list):
+    count = len(inv_list)
+    inv_payload = struct.pack('<B', count)
+    for inv_item in inv_list:
+        inv_type, inv_hash = inv_item
+        inv_payload += struct.pack('<I', inv_type) + inv_hash
+    return create_message('getdata', inv_payload)
 
 
 #Parsers
+def parse_magic(message):
+    return binascii.hexlify(message[:4]).decode('utf-8')
+                                        
 def handle_message(message):
-    magic = message[:4]
     command = message[4:16].strip(b'\x00').decode('utf-8')
     length = struct.unpack('<I', message[16:20])[0]
     checksum = struct.unpack('<I', message[20:24])[0]
     payload = message[24:24+length]
-    return magic, command, length, checksum, payload
+    return command, length, checksum, payload
 
 def parse_inv_payload(payload):
     count = payload[0]
@@ -89,23 +98,25 @@ if __name__ == '__main__':
             if command == 'verack':
                 print("Received 'verack' message")
 
-    print("Here")
+    print("Connected to bitcoin network!")
     try:
         # Continuously listen for messages
         while True:
             msg = s.recv(2048) 
             if not msg:
                 raise Exception("No Message Received from Peer")
-
-            magic, command, length, checksum, payload = handle_message(msg)
-            if command == 'inv':
-                inv_list = parse_inv_payload(payload)
-                print("Received 'inv' message with", len(inv_list), "inventory items")
-                for inv_item in inv_list:
-                    inv_type, inv_hash = inv_item
-                    print("Inv Type:", inv_type, "Inv Hash:", binascii.hexlify(inv_hash).decode('utf-8'))
+            magic = parse_magic(msg)
+            if magic != 'f9beb4d9':
+                continue
             else:
-                print("Received", command, "message")
+                command, length, checksum, payload = handle_message(msg)
+                if command == 'inv':
+                    inv_list = parse_inv_payload(payload)
+                    print("Received 'inv' message with", len(inv_list), "inventory items")
+                    get_data_msg = get_data_request(inv_list)
+                    s.send(get_data_msg)
+                else:
+                    print("Received", command, "message")
 
     except Exception as e:
         print("Error:", e)
