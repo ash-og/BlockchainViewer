@@ -39,12 +39,23 @@ def create_payload_version():
 
 #Parsers
 def handle_message(message):
-    magic = struct.unpack('<I', message[:4])[0]
+    magic = message[:4]
     command = message[4:16].strip(b'\x00').decode('utf-8')
     length = struct.unpack('<I', message[16:20])[0]
     checksum = struct.unpack('<I', message[20:24])[0]
     payload = message[24:24+length]
     return magic, command, length, checksum, payload
+
+def parse_inv_payload(payload):
+    count = payload[0]
+    offset = 1
+    inv_list = []
+    for _ in range(count):
+        inv_type = struct.unpack('<I', payload[offset:offset+4])[0]
+        inv_hash = payload[offset+4:offset+36]
+        inv_list.append((inv_type, inv_hash))
+        offset += 36
+    return inv_list
 
 
 if __name__ == '__main__':
@@ -84,31 +95,20 @@ if __name__ == '__main__':
         while True:
             msg = s.recv(2048) 
             if not msg:
-                print("Connection lost. Closing...")
-                break
-            # magic = struct.unpack('<I', msg[:4])[0]
-            # print("Magic number:", magic)
-
-            # command = msg[4:16].strip(b'\x00').decode('utf-8')
-            # print("Command:", command)
-
-            # length = struct.unpack('<I', msg[16:20])[0]
-            # print("Payload length:", length)
-
-            # checksum = struct.unpack('<I', msg[20:24])[0]
-            # print("Checksum:", checksum)
-
-            # payload = msg[24:24+length]
-            # print("Payload:", payload)
+                raise Exception("No Message Received from Peer")
 
             magic, command, length, checksum, payload = handle_message(msg)
-            print("Magic number:", magic)
-            print("Command:", command)
-            print("Payload length:", length)
-            print("Checksum:", checksum)
-            print("Payload:", payload)
+            if command == 'inv':
+                inv_list = parse_inv_payload(payload)
+                print("Received 'inv' message with", len(inv_list), "inventory items")
+                for inv_item in inv_list:
+                    inv_type, inv_hash = inv_item
+                    print("Inv Type:", inv_type, "Inv Hash:", binascii.hexlify(inv_hash).decode('utf-8'))
+            else:
+                print("Received", command, "message")
 
     except Exception as e:
         print("Error:", e)
+        print("Closing connection...")
     finally:
         s.close()
