@@ -59,6 +59,7 @@ if __name__ == '__main__':
     response_data = s.recv(1024)
     print("Received response:", response_data)
     if response_data:
+        # NOTE: check for magic number?
         # Getting command type to check if it's 'version'
         command = response_data[4:16].strip(b'\x00').decode('utf-8')
         if command == 'version':
