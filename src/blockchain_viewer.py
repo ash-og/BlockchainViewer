@@ -108,6 +108,7 @@ def parse_tx_outputs(payload, offset):
     
     return outputs, offset
 
+
 def parse_tx(payload, offset):
     start_offset = offset
     version = struct.unpack('<I', payload[offset:offset + 4])[0]
@@ -158,7 +159,7 @@ def parse_block(payload):
 def format_output(output):
     value = output[0]
     script = binascii.hexlify(output[1]).decode('utf-8')
-    return f"Output Value: {value / 1e8} BTC\nScript: {script}"
+    return f"Output Value: {value / 1e8:.8f} BTC\nScript: {script}"
 
 def verify_block_hash(block_header):
     return hashlib.sha256(hashlib.sha256(block_header).digest()).digest()
@@ -196,6 +197,7 @@ def handle_version_verack(s):
 
 # Main
 if __name__ == '__main__':
+
     # Set constants
     peer_ip_address = '167.172.139.248'
     peer_tcp_port = 8333
@@ -203,27 +205,33 @@ if __name__ == '__main__':
     # Establish TCP Connection
     s = connect_to_socket(peer_ip_address, peer_tcp_port)
 
-    # Version and verack
+    # Send / Receive version and verack
     handle_version_verack(s)
 
     try:
-        # Continuously listen for messages
+        # Creating buffer to store incoming data
         buffer = b""
+
+        # Continuously listen for messages
         while True:
-            print("Waiting for message...\n")
             try:
                 data = s.recv(2048)
+
+                # Check for data, if there is none, reconnect
                 if not data:
-                    print("No data received, breaking loop...")
-                    break
-                buffer += data
-                #print("Added to buffer, current length:", len(buffer))
+                    print("No data received, reconnecting...")
+                    s.close()
+                    s = connect_to_socket(peer_ip_address, peer_tcp_port)
+                    handle_version_verack(s)
+                    continue
+
+                buffer += data  # Append data to buffer
+
             except socket.timeout:
-                print("Socket timed out, retrying...")
                 continue
 
             while len(buffer) >= 24:  # Waiting for the buffer to reach minimum length of a Bitcoin message header
-                #print("Reached header length\n")
+
                 # Extract magic number and check if it's correct
                 magic = parse_magic(buffer)
                 if magic != 'f9beb4d9':
@@ -231,21 +239,23 @@ if __name__ == '__main__':
                     # Skip the first byte and reattempt parsing
                     buffer = buffer[1:]
                     continue
-
+                
+                # Parse the message and check if it's complete
                 message, buffer = handle_message(buffer)
                 if message is None:
-                    #print("Incomplete message received, waiting for more data")
                     break  # Wait for the complete message
 
                 command, length, checksum, payload = message
-                #print("Buffer Length after processing message:", len(buffer))
 
+                # Deal with inv messages and respond with getdata request
                 if command == 'inv':
                     inv_list = parse_inv_payload(payload)
                     print("Received 'inv' message with", len(inv_list), "inventory items")
                     get_data_msg = get_data_request(inv_list)
                     s.send(get_data_msg)
+                    print("-------------------------")
 
+                # Handle block messages and print block details
                 elif command == 'block':
                     print("Received 'block' message")
                     print("-------------------------")
@@ -253,8 +263,6 @@ if __name__ == '__main__':
                         version, prev_block, merkle_root, timestamp, bits, nonce, transactions = parse_block(payload)
                         
                         print("Block Version:", version)
-                        # print("Previous Block Hash:", binascii.hexlify(prev_block).decode('utf-8'))
-                        # print("Merkle Root:", binascii.hexlify(merkle_root).decode('utf-8'))
                         
                         # Convert timestamp to human-readable format
                         block_time = datetime.fromtimestamp(timestamp).strftime('%d %B %Y at %H:%M')
@@ -262,48 +270,54 @@ if __name__ == '__main__':
                         
                         print("Difficulty Bits:", bits)
                         print("Nonce:", nonce)
+                        
+                        # Verify block hash
+                        block_header = payload[:80]
+                        calculated_hash = verify_block_hash(block_header)
+                        print("Block Hash:", binascii.hexlify(calculated_hash).decode('utf-8'))
 
                         print("Transactions:")
+                        print("-------------------------")
+
+                        # Iterate through transactions and print details
                         for tx_index, (tx_version, tx_outputs, tx_lock_time) in enumerate(transactions):
                             print(f"  Transaction {tx_index + 1} (Version: {tx_version}, Lock Time: {tx_lock_time})")
                             for output_index, output in enumerate(tx_outputs):
                                 # print(f"    Output {output_index + 1}")
                                 print(format_output(output))
 
-                        # Verify block hash
-                        block_header = payload[:80]
-                        calculated_hash = verify_block_hash(block_header)
-                        print("Block Hash:", binascii.hexlify(calculated_hash).decode('utf-8'))
                         print("-------------------------")
-
+                        
                     except IndexError as e:
                         print("Error while parsing block:", e)
                         break
-
+                
+                # Handle tx messages and print transaction details
                 elif command == 'tx':
                     print("Received 'tx' message")
                     print("-------------------------")
-                    # try:
-                    #     version, outputs, lock_time, tx_length = parse_tx(payload, 0)
-                    #     print(f"Transaction Version: {version}")
-                    #     for output_index, output in enumerate(outputs):
-                    #         print(f"  Output {output_index + 1}")
-                    #         print(format_output(output))
-                    #     print("-------------------------")
+                    try:
+                        version, outputs, lock_time, tx_length = parse_tx(payload, 0)
+                        print(f"Transaction Version: {version}")
+                        for output_index, output in enumerate(outputs):
+                            print(f"  Output {output_index + 1}")
+                            print(format_output(output))
+                        print("-------------------------")
                         
-                    # except IndexError as e:
-                    #     print("Error while parsing transaction:", e)
-                    #     break
-
+                    except IndexError as e:
+                        print("Error while parsing transaction:", e)
+                        break
+                
+                # Handle ping messages and respond with pong so we don't lose connection
                 elif command == 'ping':
                     pong_msg = create_message('pong', payload)
                     s.send(pong_msg)
                     #print("Sent 'pong' message")
 
+                # Let us know what other messages we're receiving
                 else:
                     print("Received", command, "message")
-                    continue
-
+                    
     except Exception as e:
         print("Error:", e)
         print("Closing connection...")
