@@ -12,6 +12,7 @@ This project is a simple Python implementation of a Bitcoin Explorer. It connect
 1. Clone the repo:  
 ```
 git clone https://github.com/ash-og/BlockchainViewer
+cd BlockchainViewer
 ```
 
 2. Install the necessary libraries:
@@ -24,7 +25,8 @@ pip install -r requirements.txt
 To run the script, execute:
 
 ```
-python bitcoin_network.py
+cd src
+python3 blockchain_viewer.py
 ```
 
 ## Code Overview
