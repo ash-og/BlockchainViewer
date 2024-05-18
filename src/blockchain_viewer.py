@@ -4,7 +4,7 @@ import random
 import struct
 import hashlib
 import binascii
-
+from datetime import datetime
 
 # Create the TCP request object
 def create_message(command, payload):
@@ -15,7 +15,6 @@ def create_message(command, payload):
     checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
     header = struct.pack('<L12sL4s', magic, command, payload_size, checksum)
     return header + payload
-
 
 # Create the "version" request payload
 def create_payload_version():
@@ -31,25 +30,147 @@ def create_payload_version():
     relay = struct.pack('<?', False)
     return version + services + timestamp + addr_recv + addr_from + nonce + user_agent + start_height + relay
 
+# Get Data Request
+def get_data_request(inv_list):
+    count = len(inv_list)
+    inv_payload = encode_varint(count)  # Encode count as varint
+    for inv_item in inv_list:
+        inv_type, inv_hash = inv_item
+        inv_payload += struct.pack('<I', inv_type) + inv_hash
+    return create_message('getdata', inv_payload)
 
-#print(create_payload_version())
+# Parsers
+def read_varint(payload):
+    value = payload[0]
+    if value < 253:
+        return value, 1
+    elif value == 253:
+        return struct.unpack('<H', payload[1:3])[0], 3
+    elif value == 254:
+        return struct.unpack('<I', payload[1:5])[0], 5
+    else:
+        return struct.unpack('<Q', payload[1:9])[0], 9
 
-#Get Data Request
+def encode_varint(value):
+    if value < 0xfd:
+        return struct.pack('<B', value)
+    elif value <= 0xffff:
+        return struct.pack('<B', 0xfd) + struct.pack('<H', value)
+    elif value <= 0xffffffff:
+        return struct.pack('<B', 0xfe) + struct.pack('<I', value)
+    else:
+        return struct.pack('<B', 0xff) + struct.pack('<Q', value)
+
+def parse_magic(message):
+    return binascii.hexlify(message[:4]).decode('utf-8')
+
+def handle_message(buffer):
+    if len(buffer) < 24:
+        return None, buffer  # Incomplete message header
+
+    command = buffer[4:16].strip(b'\x00').decode('utf-8')
+    length = struct.unpack('<I', buffer[16:20])[0]
+    checksum = struct.unpack('<I', buffer[20:24])[0]
+
+    total_length = 24 + length
+    if len(buffer) < total_length:
+        return None, buffer  # Incomplete message
+
+    payload = buffer[24:24+length]
+    message = (command, length, checksum, payload)
+    buffer = buffer[total_length:]
+
+    return message, buffer
+
+def parse_inv_payload(payload):
+    count, offset = read_varint(payload)
+    inv_list = []
+    for _ in range(count):
+        inv_type = struct.unpack('<I', payload[offset:offset+4])[0]
+        inv_hash = payload[offset+4:offset+36]
+        inv_list.append((inv_type, inv_hash))
+        offset += 36
+    return inv_list
+
+def parse_tx_outputs(payload, offset):
+    output_count, varint_size = read_varint(payload[offset:])
+    offset += varint_size
+    outputs = []
+
+    for i in range(output_count):
+        value = struct.unpack('<Q', payload[offset:offset + 8])[0]
+        offset += 8
+        script_length, varint_size = read_varint(payload[offset:])
+        offset += varint_size
+        script = payload[offset:offset + script_length]
+        offset += script_length
+        outputs.append((value, script))
+    
+    return outputs, offset
 
 
-#Parsers
+def parse_tx(payload, offset):
+    start_offset = offset
+    version = struct.unpack('<I', payload[offset:offset + 4])[0]
+    offset += 4
 
+    input_count, varint_size = read_varint(payload[offset:])
+    offset += varint_size
 
+    # Skipping the inputs parsing as I won't be using it
+    for _ in range(input_count):
+        offset += 36  # Previous output (32-byte hash + 4-byte index)
+        script_length, varint_size = read_varint(payload[offset:])
+        offset += varint_size + script_length + 4  # Script length + script + sequence
 
-if __name__ == '__main__':
-    # Set constants
-    peer_ip_address = '167.172.139.248'
-    peer_tcp_port = 8333
+    # Parse outputs
+    outputs, offset = parse_tx_outputs(payload, offset)
 
-    # Establish TCP Connection
+    lock_time = struct.unpack('<I', payload[offset:offset + 4])[0]
+    offset += 4
+
+    return version, outputs, lock_time, offset - start_offset
+
+def parse_block(payload):
+    version = struct.unpack('<I', payload[0:4])[0]
+    prev_block = payload[4:36]
+    merkle_root = payload[36:68]
+    timestamp = struct.unpack('<I', payload[68:72])[0]
+    bits = struct.unpack('<I', payload[72:76])[0]
+    nonce = struct.unpack('<I', payload[76:80])[0]
+
+    # Parse transactions
+    offset = 80
+    tx_count, varint_size = read_varint(payload[offset:])
+    offset += varint_size
+
+    transactions = []
+    for _ in range(tx_count):
+        if offset >= len(payload):
+            print("Error: Reached end of payload while parsing transactions")
+            break
+        tx_version, tx_outputs, tx_lock_time, tx_length = parse_tx(payload, offset)
+        transactions.append((tx_version, tx_outputs, tx_lock_time))
+        offset += tx_length  # Update offset to new position
+
+    return version, prev_block, merkle_root, timestamp, bits, nonce, transactions
+
+# Helper functions
+def format_output(output):
+    value = output[0]
+    script = binascii.hexlify(output[1]).decode('utf-8')
+    return f"Output Value: {value / 1e8:.8f} BTC\nScript: {script}"
+
+def verify_block_hash(block_header):
+    return hashlib.sha256(hashlib.sha256(block_header).digest()).digest()
+
+def connect_to_socket(peer_ip_address, peer_tcp_port):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((peer_ip_address, 8333))
+    s.settimeout(10)  # Set timeout for the socket
+    s.connect((peer_ip_address, peer_tcp_port))
+    return s
 
+def handle_version_verack(s):
     # Create Request Objects
     version_payload = create_payload_version()
     version_message = create_message('version', version_payload)
@@ -57,9 +178,7 @@ if __name__ == '__main__':
     # Send message 'version'
     s.send(version_message)
     response_data = s.recv(1024)
-    print("Received response:", response_data)
     if response_data:
-        # NOTE: check for magic number?
         # Getting command type to check if it's 'version'
         command = response_data[4:16].strip(b'\x00').decode('utf-8')
         if command == 'version':
@@ -69,18 +188,138 @@ if __name__ == '__main__':
             s.send(verack_msg)
             print("Sent 'verack' message")
             # Receive 'verack' message
-            s.recv(1024)
-            print("Received 'verack' message")
+            verack_response = s.recv(1024)
+            command = verack_response[4:16].strip(b'\x00').decode('utf-8')
+            if command == 'verack':
+                print("Received 'verack' message")
 
-    print("Here")
+    print("Connected to bitcoin network!")
+
+# Main
+if __name__ == '__main__':
+
+    # Set constants
+    peer_ip_address = '167.172.139.248'
+    peer_tcp_port = 8333
+
+    # Establish TCP Connection
+    s = connect_to_socket(peer_ip_address, peer_tcp_port)
+
+    # Send / Receive version and verack
+    handle_version_verack(s)
+
     try:
+        # Creating buffer to store incoming data
+        buffer = b""
+
         # Continuously listen for messages
         while True:
-            msg = s.recv(2048) 
-            if not msg:
-                break
-            print("Received message:", msg)
+            try:
+                data = s.recv(2048)
+
+                # Check for data, if there is none, reconnect
+                if not data:
+                    print("No data received, reconnecting...")
+                    s.close()
+                    s = connect_to_socket(peer_ip_address, peer_tcp_port)
+                    handle_version_verack(s)
+                    continue
+
+                buffer += data  # Append data to buffer
+
+            except socket.timeout:
+                continue
+
+            while len(buffer) >= 24:  # Waiting for the buffer to reach minimum length of a Bitcoin message header
+
+                # Extract magic number and check if it's correct
+                magic = parse_magic(buffer)
+                if magic != 'f9beb4d9':
+                    print("Magic:", magic)
+                    # Skip the first byte and reattempt parsing
+                    buffer = buffer[1:]
+                    continue
+                
+                # Parse the message and check if it's complete
+                message, buffer = handle_message(buffer)
+                if message is None:
+                    break  # Wait for the complete message
+
+                command, length, checksum, payload = message
+
+                # Deal with inv messages and respond with getdata request
+                if command == 'inv':
+                    inv_list = parse_inv_payload(payload)
+                    print("Received 'inv' message with", len(inv_list), "inventory items")
+                    get_data_msg = get_data_request(inv_list)
+                    s.send(get_data_msg)
+                    print("-------------------------")
+
+                # Handle block messages and print block details
+                elif command == 'block':
+                    print("Received 'block' message")
+                    print("-------------------------")
+                    try:
+                        version, prev_block, merkle_root, timestamp, bits, nonce, transactions = parse_block(payload)
+                        
+                        print("Block Version:", version)
+                        
+                        # Convert timestamp to human-readable format
+                        block_time = datetime.fromtimestamp(timestamp).strftime('%d %B %Y at %H:%M')
+                        print("Block Timestamp:", block_time)
+                        
+                        print("Difficulty Bits:", bits)
+                        print("Nonce:", nonce)
+                        
+                        # Verify block hash
+                        block_header = payload[:80]
+                        calculated_hash = verify_block_hash(block_header)
+                        print("Block Hash:", binascii.hexlify(calculated_hash).decode('utf-8'))
+
+                        print("Transactions:")
+                        print("-------------------------")
+
+                        # Iterate through transactions and print details
+                        for tx_index, (tx_version, tx_outputs, tx_lock_time) in enumerate(transactions):
+                            print(f"  Transaction {tx_index + 1} (Version: {tx_version}, Lock Time: {tx_lock_time})")
+                            for output_index, output in enumerate(tx_outputs):
+                                # print(f"    Output {output_index + 1}")
+                                print(format_output(output))
+
+                        print("-------------------------")
+                        
+                    except IndexError as e:
+                        print("Error while parsing block:", e)
+                        break
+                
+                # Handle tx messages and print transaction details
+                elif command == 'tx':
+                    print("Received 'tx' message")
+                    print("-------------------------")
+                    try:
+                        version, outputs, lock_time, tx_length = parse_tx(payload, 0)
+                        print(f"Transaction Version: {version}")
+                        for output_index, output in enumerate(outputs):
+                            print(f"  Output {output_index + 1}")
+                            print(format_output(output))
+                        print("-------------------------")
+                        
+                    except IndexError as e:
+                        print("Error while parsing transaction:", e)
+                        break
+                
+                # Handle ping messages and respond with pong so we don't lose connection
+                elif command == 'ping':
+                    pong_msg = create_message('pong', payload)
+                    s.send(pong_msg)
+                    #print("Sent 'pong' message")
+
+                # Let us know what other messages we're receiving
+                else:
+                    print("Received", command, "message")
+                    
     except Exception as e:
         print("Error:", e)
+        print("Closing connection...")
     finally:
         s.close()
