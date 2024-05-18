@@ -78,14 +78,57 @@ def handle_message(message):
 
 def parse_inv_payload(payload):
     count, offset = read_varint(payload)
+    # print(count)
+    # print(offset)
     inv_list = []
     for _ in range(count):
         inv_type = struct.unpack('<I', payload[offset:offset+4])[0]
+        if inv_type==2:
+            print("BLOCK MESSAGE ALERT!!!!!!")
         inv_hash = payload[offset+4:offset+36]
         inv_list.append((inv_type, inv_hash))
         offset += 36
     return inv_list
 
+def parse_tx_outputs(payload, offset):
+    output_count, varint_size = read_varint(payload[offset:])
+    offset += varint_size
+    outputs = []
+
+    for i in range(output_count):
+        value = struct.unpack('<Q', payload[offset:offset + 8])[0]
+        offset += 8
+        script_length, varint_size = read_varint(payload[offset:])
+        offset += varint_size
+        script = payload[offset:offset + script_length]
+        offset += script_length
+        outputs.append((value, script))
+    
+    return outputs, offset
+
+def parse_tx(payload):
+    offset = 0
+    version = struct.unpack('<I', payload[offset:offset + 4])[0]
+    offset += 4
+
+    input_count, varint_size = read_varint(payload[offset:])
+    offset += varint_size
+
+    # Skipping the inputs parsing as I won't be using it
+    for _ in range(input_count):
+        offset += 36  # Previous output (32-byte hash + 4-byte index)
+        script_length, varint_size = read_varint(payload[offset:])
+        offset += varint_size + script_length + 4  # Script length + script + sequence
+
+    # Parse outputs
+    outputs, offset = parse_tx_outputs(payload, offset)
+    
+    return version, outputs
+
+def format_output(output):
+    value = output[0]
+    script = binascii.hexlify(output[1]).decode('utf-8')
+    return f"Output Value: {value} sats\nScript: {script}"
 
 
 def parse_block(payload):
@@ -147,6 +190,7 @@ if __name__ == '__main__':
                 command, length, checksum, payload = handle_message(buffer)
                 total_length = 24 + length
                 if len(buffer) < total_length:
+                    print("Incomplete message received, try again")
                     break  # Wait for the complete message
 
                 message = buffer[:total_length]
@@ -169,12 +213,23 @@ if __name__ == '__main__':
                     print("Nonce:", struct.unpack('<I', nonce)[0])
 
                 elif command == 'tx':
-                    print("Received 'tx' message")
+                    print("New Transaction")
+                    version, outputs = parse_tx(payload)
+                    print("--------------------------------------")
+                    print(f"Transaction Version: {version}")
+                    print("\n")
+
+                    for i, output in enumerate(outputs):
+                        print(f"Output {i+1}")
+                        print(format_output(output))    
+                        print("\n")
+                    print("--------------------------------------")
 
                 elif command == 'ping':
                     print("Received 'ping' message")
                     pong_msg = create_message('pong', payload)
                     s.send(pong_msg)
+                    print("Sent 'pong' message")
 
                 else:
                     print("Received", command, "message")
