@@ -117,7 +117,7 @@ def parse_tx(payload):
     lock_time = struct.unpack('<I', payload[offset:offset + 4])[0]
     offset += 4
 
-    return version, outputs, lock_time
+    return version, outputs, lock_time, offset
 
 def parse_block(payload):
     version = struct.unpack('<I', payload[0:4])[0]
@@ -134,14 +134,9 @@ def parse_block(payload):
 
     transactions = []
     for _ in range(tx_count):
-        tx_version, tx_outputs, tx_lock_time = parse_tx(payload[offset:])
+        tx_version, tx_outputs, tx_lock_time, new_offset = parse_tx(payload[offset:])
         transactions.append((tx_version, tx_outputs, tx_lock_time))
-        # Calculate the length of the transaction
-        tx_length = 4  # version
-        tx_length += varint_size
-        tx_length += sum(36 + 9 + len(o[1]) for o in tx_outputs)  # inputs and outputs
-        tx_length += 4  # lock_time
-        offset += tx_length
+        offset += new_offset - offset  # Update offset to new position
 
     return version, prev_block, merkle_root, timestamp, bits, nonce, transactions
 
@@ -193,8 +188,11 @@ if __name__ == '__main__':
         # Continuously listen for messages
         buffer = b""
         while True:
+            print("Waiting for message...\n")
             buffer += s.recv(2048)
+            print("Added to buffer")
             while len(buffer) >= 24:  # Waiting for the buffer to reach minimum length of a Bitcoin message header
+                print("Reached header length\n")
                 # Extract magic number and check if it's correct
                 magic = parse_magic(buffer)
                 if magic != 'f9beb4d9':
@@ -211,6 +209,7 @@ if __name__ == '__main__':
 
                 message = buffer[:total_length]
                 buffer = buffer[total_length:]
+                print("Buffer Length:", len(buffer))
 
                 if command == 'inv':
                     inv_list = parse_inv_payload(payload)
@@ -227,7 +226,7 @@ if __name__ == '__main__':
                     print("Merkle Root:", binascii.hexlify(merkle_root).decode('utf-8'))
                     
                     # Convert timestamp to human-readable format
-                    block_time = datetime.utcfromtimestamp(timestamp).strftime('%d %B %Y at %H:%M')
+                    block_time = datetime.fromtimestamp(timestamp).strftime('%d %B %Y at %H:%M')
                     print("Block Timestamp:", block_time)
                     
                     print("Difficulty Bits:", bits)
@@ -247,7 +246,7 @@ if __name__ == '__main__':
 
 
                 elif command == 'tx':
-                    continue
+                    print("New Transaction")
                     # print("New Transaction")
                     # version, outputs = parse_tx(payload)
                     # print("--------------------------------------")
@@ -263,6 +262,7 @@ if __name__ == '__main__':
                 elif command == 'ping':
                     pong_msg = create_message('pong', payload)
                     s.send(pong_msg)
+                    print("Sent 'pong' message")
 
                 else:
                     print("Received", command, "message")
