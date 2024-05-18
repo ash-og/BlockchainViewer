@@ -4,7 +4,7 @@ import random
 import struct
 import hashlib
 import binascii
-
+from datetime import datetime
 
 # Create the TCP request object
 def create_message(command, payload):
@@ -15,7 +15,6 @@ def create_message(command, payload):
     checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
     header = struct.pack('<L12sL4s', magic, command, payload_size, checksum)
     return header + payload
-
 
 # Create the "version" request payload
 def create_payload_version():
@@ -31,10 +30,7 @@ def create_payload_version():
     relay = struct.pack('<?', False)
     return version + services + timestamp + addr_recv + addr_from + nonce + user_agent + start_height + relay
 
-
-#print(create_payload_version())
-
-#Get Data Request
+# Get Data Request
 def get_data_request(inv_list):
     count = len(inv_list)
     inv_payload = encode_varint(count)  # Encode count as varint
@@ -43,8 +39,7 @@ def get_data_request(inv_list):
         inv_payload += struct.pack('<I', inv_type) + inv_hash
     return create_message('getdata', inv_payload)
 
-
-#Parsers
+# Parsers
 def read_varint(payload):
     value = payload[0]
     if value < 253:
@@ -55,7 +50,7 @@ def read_varint(payload):
         return struct.unpack('<I', payload[1:5])[0], 5
     else:
         return struct.unpack('<Q', payload[1:9])[0], 9
-    
+
 def encode_varint(value):
     if value < 0xfd:
         return struct.pack('<B', value)
@@ -68,7 +63,7 @@ def encode_varint(value):
 
 def parse_magic(message):
     return binascii.hexlify(message[:4]).decode('utf-8')
-                                        
+
 def handle_message(message):
     command = message[4:16].strip(b'\x00').decode('utf-8')
     length = struct.unpack('<I', message[16:20])[0]
@@ -78,13 +73,9 @@ def handle_message(message):
 
 def parse_inv_payload(payload):
     count, offset = read_varint(payload)
-    # print(count)
-    # print(offset)
     inv_list = []
     for _ in range(count):
         inv_type = struct.unpack('<I', payload[offset:offset+4])[0]
-        if inv_type==2:
-            print("BLOCK MESSAGE ALERT!!!!!!")
         inv_hash = payload[offset+4:offset+36]
         inv_list.append((inv_type, inv_hash))
         offset += 36
@@ -122,24 +113,49 @@ def parse_tx(payload):
 
     # Parse outputs
     outputs, offset = parse_tx_outputs(payload, offset)
-    
-    return version, outputs
+
+    lock_time = struct.unpack('<I', payload[offset:offset + 4])[0]
+    offset += 4
+
+    return version, outputs, lock_time
+
+def parse_block(payload):
+    version = struct.unpack('<I', payload[0:4])[0]
+    prev_block = payload[4:36]
+    merkle_root = payload[36:68]
+    timestamp = struct.unpack('<I', payload[68:72])[0]
+    bits = struct.unpack('<I', payload[72:76])[0]
+    nonce = struct.unpack('<I', payload[76:80])[0]
+
+    # Parse transactions
+    offset = 80
+    tx_count, varint_size = read_varint(payload[offset:])
+    offset += varint_size
+
+    transactions = []
+    for _ in range(tx_count):
+        tx_version, tx_outputs, tx_lock_time = parse_tx(payload[offset:])
+        transactions.append((tx_version, tx_outputs, tx_lock_time))
+        # Calculate the length of the transaction
+        tx_length = 4  # version
+        tx_length += varint_size
+        tx_length += sum(36 + 9 + len(o[1]) for o in tx_outputs)  # inputs and outputs
+        tx_length += 4  # lock_time
+        offset += tx_length
+
+    return version, prev_block, merkle_root, timestamp, bits, nonce, transactions
+
+# Helper functions
 
 def format_output(output):
     value = output[0]
     script = binascii.hexlify(output[1]).decode('utf-8')
     return f"Output Value: {value} sats\nScript: {script}"
 
+def verify_block_hash(block_header):
+    return hashlib.sha256(hashlib.sha256(block_header).digest()).digest()
 
-def parse_block(payload):
-    version = payload[:4]
-    prev_block = payload[4:36]
-    merkle_root = payload[36:68]
-    timestamp = payload[68:72]
-    bits = payload[72:76]
-    nonce = payload[76:80]
-    return version, prev_block, merkle_root, timestamp, bits, nonce
-
+# Main
 
 if __name__ == '__main__':
     # Set constants
@@ -204,32 +220,49 @@ if __name__ == '__main__':
 
                 elif command == 'block':
                     print("Received 'block' message")
-                    version, prev_block, merkle_root, timestamp, bits, nonce = parse_block(payload)
+                    version, prev_block, merkle_root, timestamp, bits, nonce, transactions = parse_block(payload)
+                    
                     print("Block Version:", version)
                     print("Previous Block Hash:", binascii.hexlify(prev_block).decode('utf-8'))
                     print("Merkle Root:", binascii.hexlify(merkle_root).decode('utf-8'))
-                    print("Timestamp:", struct.unpack('<I', timestamp)[0])
-                    print("Bits:", struct.unpack('<I', bits)[0])
-                    print("Nonce:", struct.unpack('<I', nonce)[0])
+                    
+                    # Convert timestamp to human-readable format
+                    block_time = datetime.utcfromtimestamp(timestamp).strftime('%d %B %Y at %H:%M')
+                    print("Block Timestamp:", block_time)
+                    
+                    print("Difficulty Bits:", bits)
+                    print("Nonce:", nonce)
+
+                    print("Transactions:")
+                    for tx_index, (tx_version, tx_outputs, tx_lock_time) in enumerate(transactions):
+                        print(f"  Transaction {tx_index + 1} (Version: {tx_version}, Lock Time: {tx_lock_time})")
+                        for output_index, output in enumerate(tx_outputs):
+                            print(f"    Output {output_index + 1}")
+                            print(format_output(output))
+
+                    # Verify block hash
+                    block_header = payload[:80]
+                    calculated_hash = verify_block_hash(block_header)
+                    print("Block Hash:", binascii.hexlify(calculated_hash).decode('utf-8'))
+
 
                 elif command == 'tx':
-                    print("New Transaction")
-                    version, outputs = parse_tx(payload)
-                    print("--------------------------------------")
-                    print(f"Transaction Version: {version}")
-                    print("\n")
+                    continue
+                    # print("New Transaction")
+                    # version, outputs = parse_tx(payload)
+                    # print("--------------------------------------")
+                    # print(f"Transaction Version: {version}")
+                    # print("\n")
 
-                    for i, output in enumerate(outputs):
-                        print(f"Output {i+1}")
-                        print(format_output(output))    
-                        print("\n")
-                    print("--------------------------------------")
+                    # for i, output in enumerate(outputs):
+                    #     print(f"Output {i+1}")
+                    #     print(format_output(output))    
+                    #     print("\n")
+                    # print("--------------------------------------")
 
                 elif command == 'ping':
-                    print("Received 'ping' message")
                     pong_msg = create_message('pong', payload)
                     s.send(pong_msg)
-                    print("Sent 'pong' message")
 
                 else:
                     print("Received", command, "message")
